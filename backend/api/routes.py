@@ -1,31 +1,23 @@
 """
-REST API routes for the chat system.
+REST API routes.
 """
 
+import uuid
 from fastapi import APIRouter, HTTPException
 from schemas.messages import UserInput
-from schemas.responses import ChatResponse, SessionResponse, ErrorResponse
-from core.dependencies import get_session_manager, get_memory_store
+from core.dependencies import get_session_manager, get_tool_executor
 from graph.graph_builder import get_compiled_graph
-from datetime import datetime
-import uuid
 
 router = APIRouter()
 
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat")
 async def chat(input: UserInput):
-    """
-    Non-streaming chat endpoint.
-    Processes the user's message through the full agent pipeline.
-    """
+    """Non-streaming chat endpoint."""
     session_manager = get_session_manager()
-    
-    # Get or create session
     session_id = input.session_id or str(uuid.uuid4())
     session = session_manager.get_or_create(session_id)
 
-    # Build initial state
     initial_state = {
         "user_query": input.message,
         "session_id": session_id,
@@ -51,68 +43,55 @@ async def chat(input: UserInput):
     try:
         graph = get_compiled_graph()
         result = await graph.ainvoke(initial_state)
-
-        return ChatResponse(
-            session_id=session_id,
-            message=result.get("final_response", "I apologize, but I couldn't generate a response."),
-            plan=result.get("plan"),
-            tool_results=result.get("task_results", []),
-        )
+        return {
+            "session_id": session_id,
+            "message": result.get("final_response", "Could not generate response."),
+            "plan": result.get("plan"),
+            "task_results": result.get("task_results", []),
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/sessions")
 async def list_sessions():
-    """List all active sessions."""
     session_manager = get_session_manager()
     sessions = []
     for sid in session_manager.list_sessions():
         session = session_manager.get(sid)
-        sessions.append({
-            "session_id": sid,
-            "message_count": len(session.messages),
-            "created_at": session.created_at.isoformat(),
-        })
+        if session:
+            sessions.append({
+                "session_id": sid,
+                "message_count": len(session.messages),
+                "created_at": session.created_at.isoformat(),
+            })
     return {"sessions": sessions}
 
 
 @router.get("/sessions/{session_id}/history")
 async def get_session_history(session_id: str):
-    """Get chat history for a session."""
     session_manager = get_session_manager()
     session = session_manager.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-
     return {
         "session_id": session_id,
         "messages": [
-            {
-                "id": msg.id,
-                "role": msg.role.value,
-                "content": msg.content,
-                "timestamp": msg.timestamp.isoformat(),
-            }
-            for msg in session.get_history()
+            {"id": m.id, "role": m.role.value, "content": m.content, "timestamp": m.timestamp.isoformat()}
+            for m in session.get_history()
         ],
     }
 
 
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """Delete a session."""
     session_manager = get_session_manager()
     if session_manager.delete(session_id):
-        return {"status": "deleted", "session_id": session_id}
+        return {"status": "deleted"}
     raise HTTPException(status_code=404, detail="Session not found")
 
 
 @router.get("/tools")
 async def list_tools():
-    """List all available tools."""
-    from core.dependencies import get_tool_executor
     executor = get_tool_executor()
-    return {
-        "tools": executor.get_tool_schemas(),
-    }
+    return {"tools": executor.get_tool_schemas()}

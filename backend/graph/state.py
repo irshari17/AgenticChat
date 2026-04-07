@@ -1,23 +1,17 @@
 """
-LangGraph State: defines the shared state object passed between graph nodes.
+LangGraph State definition.
 """
 
-from typing import TypedDict, List, Optional, Dict, Any, Annotated
-from langgraph.graph.message import add_messages
-from schemas.messages import ExecutionPlan, ChatMessage
-from tasks.task import Task
+from typing import TypedDict, List, Optional, Dict, Any
 
 
-class AgentState(TypedDict):
-    """
-    Shared state for the LangGraph agent orchestration.
-    All nodes read from and write to this state.
-    """
+class AgentState(TypedDict, total=False):
+    """Shared state for the LangGraph orchestration."""
     # User input
     user_query: str
     session_id: str
 
-    # Chat context
+    # Context
     context: str
     chat_history: List[Dict[str, str]]
 
@@ -26,24 +20,24 @@ class AgentState(TypedDict):
     current_step_index: int
     needs_execution: bool
 
-    # Execution
+    # Tasks
     tasks: List[Dict[str, Any]]
     current_task: Optional[Dict[str, Any]]
     task_results: List[Dict[str, Any]]
 
-    # Tool execution
+    # Tool
     tool_name: Optional[str]
     tool_input: Optional[Dict[str, Any]]
     tool_result: Optional[str]
 
-    # Response generation
+    # Response
     final_response: str
     response_chunks: List[str]
 
-    # Control flow
+    # Control
     should_continue: bool
     error: Optional[str]
     direct_response: Optional[str]
 
-    # Streaming callback
+    # Streaming
     stream_callback: Optional[Any]

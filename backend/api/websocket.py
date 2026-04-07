@@ -3,8 +3,8 @@ WebSocket endpoint for streaming chat.
 """
 
 import json
-import asyncio
 import uuid
+import traceback
 from typing import Any, Dict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from graph.graph_builder import get_compiled_graph
@@ -27,57 +27,70 @@ class ConnectionManager:
     def disconnect(self, session_id: str):
         self.active_connections.pop(session_id, None)
 
-    async def send_message(self, session_id: str, message: Dict[str, Any]):
+    async def send_json(self, session_id: str, message: Dict[str, Any]):
         ws = self.active_connections.get(session_id)
         if ws:
-            await ws.send_json(message)
+            try:
+                await ws.send_json(message)
+            except Exception:
+                pass
 
 
 manager = ConnectionManager()
 
 
 @router.websocket("/chat/{session_id}")
-async def websocket_chat(websocket: WebSocket, session_id: str = None):
-    """
-    WebSocket endpoint for streaming chat.
-    
-    Client sends: {"message": "user text"}
-    Server streams: {"type": "...", "content": "..."}
-    """
+async def websocket_chat(websocket: WebSocket, session_id: str = "new"):
+    """WebSocket endpoint for streaming chat."""
+
     if not session_id or session_id == "new":
         session_id = str(uuid.uuid4())
 
     await manager.connect(websocket, session_id)
+    print(f"✅ WebSocket connected: {session_id}")
 
     # Send session info
-    await websocket.send_json({
-        "type": MessageType.STATUS.value,
-        "content": f"Connected to session: {session_id}",
-        "session_id": session_id,
-    })
+    try:
+        await websocket.send_json({
+            "type": MessageType.STATUS.value,
+            "content": f"Connected to session: {session_id}",
+            "session_id": session_id,
+        })
+    except Exception as e:
+        print(f"Error sending initial message: {e}")
+        manager.disconnect(session_id)
+        return
 
     try:
         while True:
             # Wait for user message
-            data = await websocket.receive_text()
-            
-            try:
-                msg = json.loads(data)
-            except json.JSONDecodeError:
-                msg = {"message": data}
+            raw_data = await websocket.receive_text()
 
-            user_message = msg.get("message", "")
+            try:
+                msg = json.loads(raw_data)
+            except json.JSONDecodeError:
+                msg = {"message": raw_data}
+
+            user_message = msg.get("message", "").strip()
             if not user_message:
                 continue
 
-            # Create streaming callback
-            async def stream_callback(event: Dict[str, Any]):
-                """Callback to stream events to the WebSocket client."""
-                await websocket.send_json({
-                    "type": event.get("type", "status"),
-                    "content": event.get("content", ""),
-                    "session_id": session_id,
-                })
+            print(f"📨 Received: {user_message[:100]}...")
+
+            # Create streaming callback — captures websocket and session_id
+            async def make_callback(ws: WebSocket, sid: str):
+                async def stream_callback(event: Dict[str, Any]):
+                    try:
+                        await ws.send_json({
+                            "type": event.get("type", "status"),
+                            "content": event.get("content", ""),
+                            "session_id": sid,
+                        })
+                    except Exception as e:
+                        print(f"Stream callback error: {e}")
+                return stream_callback
+
+            callback = await make_callback(websocket, session_id)
 
             # Build initial state
             session_manager = get_session_manager()
@@ -102,33 +115,38 @@ async def websocket_chat(websocket: WebSocket, session_id: str = None):
                 "should_continue": False,
                 "error": None,
                 "direct_response": None,
-                "stream_callback": stream_callback,
+                "stream_callback": callback,
             }
 
             try:
-                # Run the graph
                 graph = get_compiled_graph()
                 result = await graph.ainvoke(initial_state)
 
-                # Send final complete message
+                # Send final message
                 await websocket.send_json({
                     "type": MessageType.ASSISTANT_MESSAGE.value,
                     "content": result.get("final_response", ""),
                     "session_id": session_id,
                     "metadata": {
-                        "plan": result.get("plan"),
                         "task_results": result.get("task_results", []),
                     },
                 })
+                print(f"✅ Response sent for: {user_message[:50]}...")
 
             except Exception as e:
+                error_msg = f"Error: {str(e)}"
+                print(f"❌ Graph error: {error_msg}")
+                traceback.print_exc()
                 await websocket.send_json({
                     "type": MessageType.ERROR.value,
-                    "content": f"Error processing request: {str(e)}",
+                    "content": error_msg,
                     "session_id": session_id,
                 })
 
     except WebSocketDisconnect:
+        print(f"🔌 WebSocket disconnected: {session_id}")
         manager.disconnect(session_id)
     except Exception as e:
+        print(f"❌ WebSocket error: {str(e)}")
+        traceback.print_exc()
         manager.disconnect(session_id)

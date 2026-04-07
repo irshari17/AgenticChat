@@ -1,45 +1,32 @@
 """
-Planner Node: LangGraph node that invokes the Planner Agent.
+Planner Node for LangGraph.
 """
 
+import json
 from typing import Dict, Any
 from graph.state import AgentState
 from agents.planner import PlannerAgent
-from services.llm import LLMService
-from services.tool_executor import ToolExecutor
 from core.dependencies import get_llm_service, get_tool_executor
-
-import json
 
 
 async def planner_node(state: AgentState) -> Dict[str, Any]:
-    """
-    LangGraph node that runs the Planner Agent.
-    Analyzes the user query and generates an execution plan.
-    """
+    """Runs the Planner Agent to generate an execution plan."""
     llm = get_llm_service()
     tool_executor = get_tool_executor()
-
     planner = PlannerAgent(llm=llm, tool_executor=tool_executor)
 
-    # Notify streaming of plan generation
     callback = state.get("stream_callback")
     if callback:
-        await callback({
-            "type": "status",
-            "content": "🧠 Planning your request...",
-        })
+        await callback({"type": "status", "content": "🧠 Planning your request..."})
 
-    # Run the planner
     result = await planner.run({
-        "query": state["user_query"],
+        "query": state.get("user_query", ""),
         "context": state.get("context", ""),
     })
 
     plan = result.get("plan")
     needs_execution = result.get("needs_execution", False)
 
-    # Build tasks from plan
     tasks = []
     if plan and plan.steps:
         for step in plan.steps:
@@ -53,29 +40,18 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
                 "result": None,
             })
 
-    # Send plan to stream
-    if callback and plan:
+    if callback and plan and plan.steps:
         plan_info = {
             "reasoning": plan.reasoning,
             "steps": [
-                {
-                    "type": s.type,
-                    "tool": s.tool,
-                    "task": s.task,
-                    "reasoning": s.reasoning,
-                }
+                {"type": s.type, "tool": s.tool, "task": s.task, "reasoning": s.reasoning}
                 for s in plan.steps
             ],
         }
-        await callback({
-            "type": "plan",
-            "content": json.dumps(plan_info),
-        })
+        await callback({"type": "plan", "content": json.dumps(plan_info)})
 
-    # Check for direct response (no tools needed)
     direct_response = None
     if plan and not plan.steps:
-        # The planner decided this is a conversational response
         direct_response = result.get("response", "")
 
     return {

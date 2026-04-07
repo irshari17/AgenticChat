@@ -1,22 +1,23 @@
 """
-LLM Service: interface to OpenRouter API for model inference.
-Supports both regular and streaming completions.
+LLM Service: interface to OpenRouter API.
 """
 
 import json
+import re
 import httpx
 from typing import AsyncGenerator, List, Dict, Any, Optional
 
 
 class LLMService:
-    """
-    Service for interacting with the OpenRouter LLM API.
-    Supports streaming and non-streaming completions.
-    """
+    """Service for interacting with OpenRouter LLM API."""
 
     def __init__(self, api_key: str, base_url: str, model: str):
-        self.api_key = api_key
-        self.base_url = base_url
+        if not api_key or not api_key.strip():
+            raise ValueError(
+                "OPENROUTER_API_KEY is not set. Please set it in backend/.env or via environment variables."
+            )
+        self.api_key = api_key.strip()
+        self.base_url = base_url.rstrip("/")
         self.model = model
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -32,18 +33,7 @@ class LLMService:
         max_tokens: int = 4096,
         system_prompt: Optional[str] = None,
     ) -> str:
-        """
-        Get a non-streaming completion from the LLM.
-        
-        Args:
-            messages: List of message dicts with 'role' and 'content'.
-            temperature: Sampling temperature.
-            max_tokens: Maximum tokens to generate.
-            system_prompt: Optional system prompt prepended to messages.
-            
-        Returns:
-            The assistant's response text.
-        """
+        """Get a non-streaming completion."""
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
 
@@ -54,16 +44,28 @@ class LLMService:
             "max_tokens": max_tokens,
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self.headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
 
-        return data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"]
+            return content
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text
+            if e.response.status_code == 401:
+                return (
+                    f"LLM API error ({e.response.status_code}): {error_body[:500]}"
+                    " - check OPENROUTER_API_KEY, account status, and model access"
+                )
+            return f"LLM API error ({e.response.status_code}): {error_body[:500]}"
+        except Exception as e:
+            return f"LLM error: {str(e)}"
 
     async def stream(
         self,
@@ -72,10 +74,7 @@ class LLMService:
         max_tokens: int = 4096,
         system_prompt: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
-        """
-        Get a streaming completion from the LLM.
-        Yields text chunks as they arrive.
-        """
+        """Get a streaming completion. Yields text chunks."""
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
 
@@ -87,27 +86,30 @@ class LLMService:
             "stream": True,
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json=payload,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:]
-                        if data_str.strip() == "[DONE]":
-                            break
-                        try:
-                            data = json.loads(data_str)
-                            delta = data["choices"][0].get("delta", {})
-                            content = delta.get("content", "")
-                            if content:
-                                yield content
-                        except (json.JSONDecodeError, KeyError, IndexError):
-                            continue
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers=self.headers,
+                    json=payload,
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+                            if data_str.strip() == "[DONE]":
+                                break
+                            try:
+                                data = json.loads(data_str)
+                                delta = data["choices"][0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield content
+                            except (json.JSONDecodeError, KeyError, IndexError):
+                                continue
+        except Exception as e:
+            yield f"\n[Streaming error: {str(e)}]"
 
     async def complete_json(
         self,
@@ -115,13 +117,10 @@ class LLMService:
         system_prompt: Optional[str] = None,
         temperature: float = 0.3,
     ) -> Dict[str, Any]:
-        """
-        Get a JSON-formatted completion from the LLM.
-        Parses the response as JSON.
-        """
+        """Get a JSON-formatted completion."""
         json_instruction = (
             "\n\nIMPORTANT: Respond ONLY with valid JSON. "
-            "Do not include any text before or after the JSON object."
+            "No text before or after the JSON. No markdown code fences."
         )
 
         if system_prompt:
@@ -135,37 +134,35 @@ class LLMService:
             temperature=temperature,
         )
 
-        # Try to parse JSON from the response
         return self._extract_json(response_text)
 
     @staticmethod
     def _extract_json(text: str) -> Dict[str, Any]:
         """Extract JSON from LLM response text."""
-        # Try direct parse
+        # Try direct parse first
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
 
-        # Try to find JSON in code blocks
-        import re
+        # Try to find JSON in markdown code blocks
         json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
         if json_match:
             try:
-                return json.loads(json_match.group(1))
+                return json.loads(json_match.group(1).strip())
             except json.JSONDecodeError:
                 pass
 
-        # Try to find JSON object/array in text
+        # Try to find JSON object in text
         for start_char, end_char in [("{", "}"), ("[", "]")]:
             start = text.find(start_char)
             if start != -1:
                 end = text.rfind(end_char)
-                if end != -1:
+                if end != -1 and end > start:
                     try:
                         return json.loads(text[start:end + 1])
                     except json.JSONDecodeError:
                         pass
 
-        # Fallback: return as a wrapped dict
-        return {"raw_response": text}
+        # Fallback
+        return {"raw_response": text, "steps": [], "reasoning": text[:200]}
