@@ -1,16 +1,19 @@
 """
-File Tool: read and write files safely.
+File Tool — sandboxed file read/write/list operations.
 """
 
 import os
 import aiofiles
 from typing import Dict, Any
 from tools.base_tool import BaseTool
+import logging
+
+logger = logging.getLogger("tools.file")
 
 
 class FileTool(BaseTool):
     name = "file_tool"
-    description = "Read or write files. Actions: 'read', 'write', 'list'."
+    description = "Read, write, or list files. Actions: 'read', 'write', 'list'."
 
     SANDBOX_DIR = os.path.join(os.getcwd(), "sandbox")
 
@@ -18,45 +21,53 @@ class FileTool(BaseTool):
         os.makedirs(self.SANDBOX_DIR, exist_ok=True)
 
     def _safe_path(self, filepath: str) -> str:
+        if not filepath:
+            return self.SANDBOX_DIR
         abs_path = os.path.abspath(os.path.join(self.SANDBOX_DIR, filepath))
         if not abs_path.startswith(os.path.abspath(self.SANDBOX_DIR)):
-            raise PermissionError(f"Access denied: path outside sandbox")
+            raise PermissionError("Access denied: path outside sandbox")
         return abs_path
 
-    async def run(self, input: Dict[str, Any]) -> str:
-        action = input.get("action", "read")
-        path = input.get("path", "")
+    async def run(self, input_data: Dict[str, Any]) -> str:
+        action = input_data.get("action", "read")
+        path = input_data.get("path", "")
 
         try:
             if action == "read":
                 return await self._read(path)
             elif action == "write":
-                content = input.get("content", "")
-                return await self._write(path, content)
+                return await self._write(path, input_data.get("content", ""))
             elif action == "list":
                 return await self._list(path)
             else:
-                return f"Unknown action: {action}"
+                return f"Unknown action: {action}. Use: read, write, list"
+        except PermissionError as e:
+            return f"Permission denied: {e}"
         except Exception as e:
+            logger.error(f"File tool error: {e}")
             return f"File tool error: {str(e)}"
 
     async def _read(self, path: str) -> str:
         safe = self._safe_path(path)
         if not os.path.exists(safe):
             return f"File not found: {path}"
+        if os.path.isdir(safe):
+            return await self._list(path)
         async with aiofiles.open(safe, "r", encoding="utf-8", errors="replace") as f:
             content = await f.read()
-        return f"Contents of {path}:\n{content}"
+        return f"Contents of '{path}':\n{content}"
 
     async def _write(self, path: str, content: str) -> str:
+        if not path:
+            return "Error: no file path specified"
         safe = self._safe_path(path)
-        os.makedirs(os.path.dirname(safe) if os.path.dirname(safe) != safe else safe, exist_ok=True)
-        dir_name = os.path.dirname(safe)
-        if dir_name:
-            os.makedirs(dir_name, exist_ok=True)
+        parent = os.path.dirname(safe)
+        if parent and not os.path.exists(parent):
+            os.makedirs(parent, exist_ok=True)
         async with aiofiles.open(safe, "w", encoding="utf-8") as f:
             await f.write(content)
-        return f"Successfully wrote {len(content)} characters to {path}"
+        logger.info(f"File written: {path} ({len(content)} chars)")
+        return f"Successfully wrote {len(content)} characters to '{path}'"
 
     async def _list(self, path: str = "") -> str:
         safe = self._safe_path(path) if path else self.SANDBOX_DIR
@@ -64,12 +75,15 @@ class FileTool(BaseTool):
             return f"Not a directory: {path}"
         entries = os.listdir(safe)
         if not entries:
-            return f"Directory is empty"
-        lines = [f"Contents of {path or '.'}:"]
+            return f"Directory '{path or '.'}' is empty"
+        lines = [f"Contents of '{path or '.'}':"]
         for entry in sorted(entries):
             full = os.path.join(safe, entry)
-            marker = "📁" if os.path.isdir(full) else "📄"
-            lines.append(f"  {marker} {entry}")
+            if os.path.isdir(full):
+                lines.append(f"  📁 {entry}/")
+            else:
+                size = os.path.getsize(full)
+                lines.append(f"  📄 {entry} ({size} bytes)")
         return "\n".join(lines)
 
     def get_schema(self) -> Dict[str, Any]:
@@ -77,8 +91,8 @@ class FileTool(BaseTool):
             "name": self.name,
             "description": self.description,
             "parameters": {
-                "action": {"type": "string", "enum": ["read", "write", "list"]},
-                "path": {"type": "string", "description": "Relative file path"},
-                "content": {"type": "string", "description": "Content to write"},
+                "action": {"type": "string", "enum": ["read", "write", "list"], "description": "Operation type"},
+                "path": {"type": "string", "description": "Relative file path within sandbox"},
+                "content": {"type": "string", "description": "Content to write (for write action)"},
             },
         }

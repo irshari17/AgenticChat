@@ -1,23 +1,19 @@
 """
-Configuration management using Pydantic settings.
+Application configuration — loads from .env and environment variables.
 """
 
 from typing import List
 from pydantic_settings import BaseSettings
-from pydantic import Field
-import os
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
-
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     DEBUG: bool = True
 
-    # OpenRouter API
-    OPENROUTER_API_KEY: str = "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"
+    # LLM
+    OPENROUTER_API_KEY: str = "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"
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     MODEL_NAME: str = "openai/gpt-oss-120b:free"
 
@@ -30,7 +26,7 @@ class Settings(BaseSettings):
     ]
 
     # Memory
-    MAX_MEMORY_ITEMS: int = 100
+    MAX_MEMORY_ITEMS: int = 200
     MAX_CHAT_HISTORY: int = 50
 
     # Tools
@@ -40,22 +36,17 @@ class Settings(BaseSettings):
 
     # Safety
     SHELL_TIMEOUT: int = 30
-    MAX_FILE_SIZE: int = 10_000_000  # 10MB
+    MAX_FILE_SIZE: int = 10_000_000
+
+    # Agent
+    MAX_RETRIES: int = 3
+    MAX_PLAN_STEPS: int = 10
+    MAX_RECURSIVE_DEPTH: int = 3
 
     class Config:
-        env_file = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", ".env")
-        )
+        env_file = ".env"
         env_file_encoding = "utf-8"
-        extra = "ignore"  # Ignore extra env vars
+        extra = "ignore"
 
 
-# Create settings instance
-try:
-    settings = Settings()
-except Exception as e:
-    print(f"Warning: Error loading settings: {e}")
-    print("Using defaults...")
-    settings = Settings(
-        _env_file=None,  # type: ignore
-    )
+settings = Settings()

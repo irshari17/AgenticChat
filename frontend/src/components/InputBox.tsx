@@ -9,7 +9,6 @@ const InputBox: React.FC<InputBoxProps> = ({ onSend, disabled = false }) => {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-resize textarea
   useEffect(() => {
     const textarea = textareaRef.current;
     if (textarea) {
@@ -22,7 +21,6 @@ const InputBox: React.FC<InputBoxProps> = ({ onSend, disabled = false }) => {
     if (input.trim() && !disabled) {
       onSend(input.trim());
       setInput('');
-      // Reset height
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
@@ -39,9 +37,9 @@ const InputBox: React.FC<InputBoxProps> = ({ onSend, disabled = false }) => {
   return (
     <div
       style={{
-        padding: '16px 24px',
-        borderTop: '1px solid #2a2a2a',
-        backgroundColor: '#141414',
+        padding: '14px 24px',
+        borderTop: '1px solid #1e1e2e',
+        backgroundColor: '#0d0d14',
       }}
     >
       <div
@@ -58,14 +56,14 @@ const InputBox: React.FC<InputBoxProps> = ({ onSend, disabled = false }) => {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={disabled ? 'Waiting...' : 'Type your message... (Shift+Enter for new line)'}
+          placeholder={disabled ? 'Processing...' : 'Type your message... (Shift+Enter for new line)'}
           disabled={disabled}
           rows={1}
           style={{
             flex: 1,
             padding: '12px 16px',
-            backgroundColor: '#1e1e2e',
-            border: '1px solid #333',
+            backgroundColor: '#111119',
+            border: '1px solid #252538',
             borderRadius: '12px',
             color: '#e0e0e0',
             fontSize: '14px',
@@ -81,7 +79,7 @@ const InputBox: React.FC<InputBoxProps> = ({ onSend, disabled = false }) => {
             e.target.style.borderColor = '#667eea';
           }}
           onBlur={(e) => {
-            e.target.style.borderColor = '#333';
+            e.target.style.borderColor = '#252538';
           }}
         />
         <button
@@ -90,8 +88,8 @@ const InputBox: React.FC<InputBoxProps> = ({ onSend, disabled = false }) => {
           style={{
             padding: '12px 20px',
             backgroundColor:
-              disabled || !input.trim() ? '#2a2a2a' : '#667eea',
-            color: disabled || !input.trim() ? '#666' : '#fff',
+              disabled || !input.trim() ? '#1a1a28' : '#667eea',
+            color: disabled || !input.trim() ? '#555' : '#fff',
             border: 'none',
             borderRadius: '12px',
             cursor: disabled || !input.trim() ? 'not-allowed' : 'pointer',
@@ -112,18 +110,18 @@ const InputBox: React.FC<InputBoxProps> = ({ onSend, disabled = false }) => {
             }
           }}
         >
-          Send ➤
+          Send \u27a4
         </button>
       </div>
       <div
         style={{
           textAlign: 'center',
-          fontSize: '11px',
-          color: '#555',
+          fontSize: '10px',
+          color: '#444',
           marginTop: '8px',
         }}
       >
-        Agentic AI Chat • Learning & Experimentation System
+        Agentic AI Chat v2 \u2022 Coordinator \u2192 Planner \u2192 Executor
       </div>
     </div>
   );

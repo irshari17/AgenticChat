@@ -1,19 +1,22 @@
 """
-LangGraph State definition.
+LangGraph State — the shared state object passed through all graph nodes.
 """
 
 from typing import TypedDict, List, Optional, Dict, Any
 
 
 class AgentState(TypedDict, total=False):
-    """Shared state for the LangGraph orchestration."""
-    # User input
+    # Input
     user_query: str
     session_id: str
 
     # Context
     context: str
     chat_history: List[Dict[str, str]]
+
+    # Coordinator
+    classification: str
+    needs_planning: bool
 
     # Planning
     plan: Optional[Dict[str, Any]]
@@ -33,11 +36,11 @@ class AgentState(TypedDict, total=False):
     # Response
     final_response: str
     response_chunks: List[str]
+    direct_response: Optional[str]
 
     # Control
     should_continue: bool
     error: Optional[str]
-    direct_response: Optional[str]
 
     # Streaming
     stream_callback: Optional[Any]

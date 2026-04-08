@@ -1,5 +1,6 @@
 """
 WebSocket endpoint for streaming chat.
+All agent activity, tool calls, and responses are streamed in real-time.
 """
 
 import json
@@ -10,28 +11,28 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from graph.graph_builder import get_compiled_graph
 from core.dependencies import get_session_manager
 from schemas.messages import MessageType
+import logging
 
+logger = logging.getLogger("api.websocket")
 router = APIRouter()
 
 
 class ConnectionManager:
-    """Manages active WebSocket connections."""
-
     def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
+        self.connections: Dict[str, WebSocket] = {}
 
-    async def connect(self, websocket: WebSocket, session_id: str):
-        await websocket.accept()
-        self.active_connections[session_id] = websocket
+    async def connect(self, ws: WebSocket, session_id: str):
+        await ws.accept()
+        self.connections[session_id] = ws
 
     def disconnect(self, session_id: str):
-        self.active_connections.pop(session_id, None)
+        self.connections.pop(session_id, None)
 
-    async def send_json(self, session_id: str, message: Dict[str, Any]):
-        ws = self.active_connections.get(session_id)
+    async def send(self, session_id: str, data: Dict[str, Any]):
+        ws = self.connections.get(session_id)
         if ws:
             try:
-                await ws.send_json(message)
+                await ws.send_json(data)
             except Exception:
                 pass
 
@@ -41,15 +42,15 @@ manager = ConnectionManager()
 
 @router.websocket("/chat/{session_id}")
 async def websocket_chat(websocket: WebSocket, session_id: str = "new"):
-    """WebSocket endpoint for streaming chat."""
+    """Main WebSocket endpoint for streaming agent chat."""
 
     if not session_id or session_id == "new":
         session_id = str(uuid.uuid4())
 
     await manager.connect(websocket, session_id)
-    print(f"✅ WebSocket connected: {session_id}")
+    logger.info(f"WS connected: {session_id[:12]}...")
 
-    # Send session info
+    # Send session confirmation
     try:
         await websocket.send_json({
             "type": MessageType.STATUS.value,
@@ -57,42 +58,40 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "new"):
             "session_id": session_id,
         })
     except Exception as e:
-        print(f"Error sending initial message: {e}")
+        logger.error(f"Failed to send initial message: {e}")
         manager.disconnect(session_id)
         return
 
     try:
         while True:
-            # Wait for user message
-            raw_data = await websocket.receive_text()
+            raw = await websocket.receive_text()
 
             try:
-                msg = json.loads(raw_data)
+                msg = json.loads(raw)
             except json.JSONDecodeError:
-                msg = {"message": raw_data}
+                msg = {"message": raw}
 
             user_message = msg.get("message", "").strip()
             if not user_message:
                 continue
 
-            print(f"📨 Received: {user_message[:100]}...")
+            logger.info(f"[{session_id[:8]}] {user_message[:100]}...")
 
-            # Create streaming callback — captures websocket and session_id
-            async def make_callback(ws: WebSocket, sid: str):
-                async def stream_callback(event: Dict[str, Any]):
-                    try:
-                        await ws.send_json({
-                            "type": event.get("type", "status"),
-                            "content": event.get("content", ""),
-                            "session_id": sid,
-                        })
-                    except Exception as e:
-                        print(f"Stream callback error: {e}")
-                return stream_callback
+            # Build callback that captures current websocket and session_id
+            _ws = websocket
+            _sid = session_id
 
-            callback = await make_callback(websocket, session_id)
+            async def stream_callback(event: Dict[str, Any]):
+                try:
+                    await _ws.send_json({
+                        "type": event.get("type", "status"),
+                        "content": event.get("content", ""),
+                        "session_id": _sid,
+                    })
+                except Exception as cb_err:
+                    logger.warning(f"Stream callback error: {cb_err}")
 
-            # Build initial state
+            # Build state
             session_manager = get_session_manager()
             session = session_manager.get_or_create(session_id)
 
@@ -101,6 +100,8 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "new"):
                 "session_id": session_id,
                 "context": session.get_context_string(last_n=10),
                 "chat_history": [],
+                "classification": "",
+                "needs_planning": False,
                 "plan": None,
                 "current_step_index": 0,
                 "needs_execution": False,
@@ -115,38 +116,46 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "new"):
                 "should_continue": False,
                 "error": None,
                 "direct_response": None,
-                "stream_callback": callback,
+                "stream_callback": stream_callback,
             }
 
             try:
                 graph = get_compiled_graph()
                 result = await graph.ainvoke(initial_state)
 
-                # Send final message
+                # Send final complete message
                 await websocket.send_json({
                     "type": MessageType.ASSISTANT_MESSAGE.value,
                     "content": result.get("final_response", ""),
                     "session_id": session_id,
                     "metadata": {
-                        "task_results": result.get("task_results", []),
+                        "classification": result.get("classification"),
+                        "task_results": [
+                            {k: v for k, v in r.items() if k != "result" or len(str(v)) < 500}
+                            for r in result.get("task_results", [])
+                        ],
                     },
                 })
-                print(f"✅ Response sent for: {user_message[:50]}...")
+
+                logger.info(f"[{session_id[:8]}] Response sent")
 
             except Exception as e:
-                error_msg = f"Error: {str(e)}"
-                print(f"❌ Graph error: {error_msg}")
+                error_msg = f"Processing error: {str(e)}"
+                logger.error(f"[{session_id[:8]}] {error_msg}")
                 traceback.print_exc()
-                await websocket.send_json({
-                    "type": MessageType.ERROR.value,
-                    "content": error_msg,
-                    "session_id": session_id,
-                })
+                try:
+                    await websocket.send_json({
+                        "type": MessageType.ERROR.value,
+                        "content": error_msg,
+                        "session_id": session_id,
+                    })
+                except Exception:
+                    pass
 
     except WebSocketDisconnect:
-        print(f"🔌 WebSocket disconnected: {session_id}")
+        logger.info(f"WS disconnected: {session_id[:12]}")
         manager.disconnect(session_id)
     except Exception as e:
-        print(f"❌ WebSocket error: {str(e)}")
+        logger.error(f"WS error: {e}")
         traceback.print_exc()
         manager.disconnect(session_id)

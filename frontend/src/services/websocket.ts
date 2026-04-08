@@ -1,5 +1,6 @@
 /**
  * WebSocket service for communicating with the backend agent system.
+ * v2: Added agent_status and coordinator message types.
  */
 
 export type MessageType =
@@ -10,6 +11,8 @@ export type MessageType =
   | 'tool_result'
   | 'plan'
   | 'task_update'
+  | 'agent_status'
+  | 'coordinator'
   | 'error'
   | 'status'
   | 'stream_start'
@@ -22,23 +25,21 @@ export interface WSMessage {
   metadata?: Record<string, any>;
 }
 
-export type WSEventHandler = (message: WSMessage) => void;
+export type MessageHandler = (message: WSMessage) => void;
 
 export class ChatWebSocket {
   private ws: WebSocket | null = null;
   private sessionId: string;
-  private handlers: Map<string, WSEventHandler[]> = new Map();
+  private handlers: Map<string, MessageHandler[]> = new Map();
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
+  private intentionalClose = false;
 
   constructor(sessionId: string = 'new') {
     this.sessionId = sessionId;
   }
 
-  /**
-   * Connect to the WebSocket server.
-   */
   connect(): Promise<string> {
     return new Promise((resolve, reject) => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -53,8 +54,9 @@ export class ChatWebSocket {
       }
 
       this.ws.onopen = () => {
-        console.log('WebSocket connected');
+        console.log('[WS] Connected');
         this.reconnectAttempts = 0;
+        this.intentionalClose = false;
         this.emit('connected', {
           type: 'status',
           content: 'Connected',
@@ -66,27 +68,23 @@ export class ChatWebSocket {
         try {
           const msg: WSMessage = JSON.parse(event.data);
 
-          // Update session ID from server
           if (msg.session_id && msg.session_id !== this.sessionId) {
             this.sessionId = msg.session_id;
           }
 
-          // If this is the initial status with session ID, resolve
           if (msg.type === 'status' && msg.content.startsWith('Connected')) {
             resolve(msg.session_id);
           }
 
-          // Emit to type-specific handlers
           this.emit(msg.type, msg);
-          // Emit to catch-all handlers
           this.emit('*', msg);
         } catch (err) {
-          console.error('Failed to parse WebSocket message:', err);
+          console.error('[WS] Failed to parse message:', err);
         }
       };
 
       this.ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        console.error('[WS] Error:', error);
         this.emit('error', {
           type: 'error',
           content: 'WebSocket connection error',
@@ -95,16 +93,17 @@ export class ChatWebSocket {
       };
 
       this.ws.onclose = () => {
-        console.log('WebSocket closed');
+        console.log('[WS] Closed');
         this.emit('disconnected', {
           type: 'status',
           content: 'Disconnected',
           session_id: this.sessionId,
         });
-        this.attemptReconnect();
+        if (!this.intentionalClose) {
+          this.attemptReconnect();
+        }
       };
 
-      // Timeout for initial connection
       setTimeout(() => {
         if (this.ws?.readyState !== WebSocket.OPEN) {
           reject(new Error('Connection timeout'));
@@ -113,31 +112,22 @@ export class ChatWebSocket {
     });
   }
 
-  /**
-   * Send a message to the server.
-   */
   sendMessage(message: string) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ message }));
     } else {
-      console.error('WebSocket is not connected');
+      console.error('[WS] Not connected');
     }
   }
 
-  /**
-   * Register an event handler.
-   */
-  on(event: string, handler: WSEventHandler) {
+  on(event: string, handler: MessageHandler) {
     if (!this.handlers.has(event)) {
       this.handlers.set(event, []);
     }
     this.handlers.get(event)!.push(handler);
   }
 
-  /**
-   * Remove an event handler.
-   */
-  off(event: string, handler: WSEventHandler) {
+  off(event: string, handler: MessageHandler) {
     const handlers = this.handlers.get(event);
     if (handlers) {
       const index = handlers.indexOf(handler);
@@ -147,49 +137,34 @@ export class ChatWebSocket {
     }
   }
 
-  /**
-   * Emit an event to all registered handlers.
-   */
   private emit(event: string, message: WSMessage) {
     const handlers = this.handlers.get(event) || [];
     handlers.forEach((handler) => handler(message));
   }
 
-  /**
-   * Attempt to reconnect after disconnection.
-   */
   private attemptReconnect() {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       const delay = this.reconnectDelay * this.reconnectAttempts;
-      console.log(`Attempting reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
+      console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
       setTimeout(() => {
         this.connect().catch(() => {});
       }, delay);
     }
   }
 
-  /**
-   * Disconnect from the server.
-   */
   disconnect() {
-    this.maxReconnectAttempts = 0; // Prevent reconnection
+    this.intentionalClose = true;
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
   }
 
-  /**
-   * Get the current session ID.
-   */
   getSessionId(): string {
     return this.sessionId;
   }
 
-  /**
-   * Check if the WebSocket is connected.
-   */
   isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
   }

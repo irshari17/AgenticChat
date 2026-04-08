@@ -2,13 +2,13 @@ import React, { useRef, useEffect } from 'react';
 import { useChat } from '../hooks/useChat';
 import Message from './Message';
 import InputBox from './InputBox';
+import AgentActivity from './AgentActivity';
 
 const ChatWindow: React.FC = () => {
-  const { messages, sendMessage, isConnected, isLoading, sessionId, error } =
+  const { messages, agentEvents, sendMessage, isConnected, isLoading, sessionId, error } =
     useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -25,11 +25,11 @@ const ChatWindow: React.FC = () => {
       {/* Connection Status Bar */}
       <div
         style={{
-          padding: '6px 24px',
-          fontSize: '12px',
-          backgroundColor: isConnected ? '#0d2818' : '#2d1117',
+          padding: '5px 24px',
+          fontSize: '11px',
+          backgroundColor: isConnected ? '#0a1f14' : '#2d1117',
           color: isConnected ? '#3fb950' : '#f85149',
-          borderBottom: '1px solid #2a2a2a',
+          borderBottom: '1px solid #1e1e2e',
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
@@ -37,16 +37,16 @@ const ChatWindow: React.FC = () => {
       >
         <span
           style={{
-            width: '8px',
-            height: '8px',
+            width: '6px',
+            height: '6px',
             borderRadius: '50%',
             backgroundColor: isConnected ? '#3fb950' : '#f85149',
             display: 'inline-block',
           }}
         />
         {isConnected
-          ? `Connected • Session: ${sessionId?.slice(0, 8) || '...'}...`
-          : 'Disconnected — Attempting to reconnect...'}
+          ? `Connected \u2022 Session: ${sessionId?.slice(0, 8) || '...'}...`
+          : 'Disconnected \u2014 Attempting to reconnect...'}
       </div>
 
       {/* Messages Area */}
@@ -57,7 +57,7 @@ const ChatWindow: React.FC = () => {
           padding: '24px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '16px',
+          gap: '12px',
         }}
       >
         {messages.length === 0 && (
@@ -68,18 +68,18 @@ const ChatWindow: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'center',
               flex: 1,
-              color: '#666',
+              color: '#555',
               textAlign: 'center',
               gap: '12px',
             }}
           >
-            <div style={{ fontSize: '48px' }}>🤖</div>
-            <h2 style={{ fontSize: '20px', color: '#999' }}>
-              Agentic AI Chat
+            <div style={{ fontSize: '48px', opacity: 0.7 }}>\ud83e\udd16</div>
+            <h2 style={{ fontSize: '20px', color: '#888' }}>
+              Agentic AI Chat <span style={{ color: '#667eea', fontSize: '14px' }}>v2</span>
             </h2>
-            <p style={{ fontSize: '14px', maxWidth: '400px' }}>
-              I can help you with tasks using tools like file operations, web
-              fetching, and shell commands. Try asking me something!
+            <p style={{ fontSize: '13px', maxWidth: '420px', color: '#666' }}>
+              Multi-agent system with Coordinator, Planner, and Executor.
+              I can use tools like file operations, web fetching, and shell commands.
             </p>
             <div
               style={{
@@ -91,31 +91,31 @@ const ChatWindow: React.FC = () => {
               }}
             >
               {[
-                'List files in the current directory',
-                'What is the weather API?',
+                'List files in the sandbox',
+                'Fetch https://httpbin.org/json',
                 'Write a hello.txt file',
-                'Explain how LangGraph works',
+                'What can you do?',
               ].map((suggestion) => (
                 <button
                   key={suggestion}
                   onClick={() => sendMessage(suggestion)}
                   style={{
                     padding: '8px 16px',
-                    backgroundColor: '#1a1a2e',
-                    border: '1px solid #333',
+                    backgroundColor: '#111',
+                    border: '1px solid #2a2a3a',
                     borderRadius: '20px',
-                    color: '#aaa',
+                    color: '#999',
                     cursor: 'pointer',
-                    fontSize: '13px',
+                    fontSize: '12px',
                     transition: 'all 0.2s',
                   }}
                   onMouseOver={(e) => {
                     (e.target as HTMLButtonElement).style.borderColor = '#667eea';
-                    (e.target as HTMLButtonElement).style.color = '#fff';
+                    (e.target as HTMLButtonElement).style.color = '#ddd';
                   }}
                   onMouseOut={(e) => {
-                    (e.target as HTMLButtonElement).style.borderColor = '#333';
-                    (e.target as HTMLButtonElement).style.color = '#aaa';
+                    (e.target as HTMLButtonElement).style.borderColor = '#2a2a3a';
+                    (e.target as HTMLButtonElement).style.color = '#999';
                   }}
                 >
                   {suggestion}
@@ -129,31 +129,28 @@ const ChatWindow: React.FC = () => {
           <Message key={msg.id} message={msg} />
         ))}
 
-        {isLoading && (
+        {/* Agent Activity indicator */}
+        {isLoading && agentEvents.length > 0 && (
+          <AgentActivity events={agentEvents} />
+        )}
+
+        {isLoading && agentEvents.length === 0 && (
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              color: '#888',
-              fontSize: '14px',
+              color: '#666',
+              fontSize: '13px',
               padding: '8px 0',
             }}
           >
             <div className="loading-dots">
-              <span style={{ animation: 'blink 1.4s infinite both' }}>●</span>
-              <span
-                style={{ animation: 'blink 1.4s infinite both 0.2s' }}
-              >
-                ●
-              </span>
-              <span
-                style={{ animation: 'blink 1.4s infinite both 0.4s' }}
-              >
-                ●
-              </span>
+              <span style={{ animation: 'blink 1.4s infinite both' }}>\u25cf</span>
+              <span style={{ animation: 'blink 1.4s infinite both 0.2s' }}>\u25cf</span>
+              <span style={{ animation: 'blink 1.4s infinite both 0.4s' }}>\u25cf</span>
             </div>
-            <span>Thinking...</span>
+            <span>Processing...</span>
           </div>
         )}
 

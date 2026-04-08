@@ -8,18 +8,18 @@ const App: React.FC = () => {
         display: 'flex',
         flexDirection: 'column',
         height: '100vh',
-        backgroundColor: '#0f0f0f',
+        backgroundColor: '#0a0a0f',
       }}
     >
       {/* Header */}
       <header
         style={{
-          padding: '16px 24px',
-          borderBottom: '1px solid #2a2a2a',
+          padding: '14px 24px',
+          borderBottom: '1px solid #1e1e2e',
           display: 'flex',
           alignItems: 'center',
           gap: '12px',
-          background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+          background: 'linear-gradient(135deg, #0d0d1a 0%, #111827 100%)',
         }}
       >
         <div
@@ -45,16 +45,16 @@ const App: React.FC = () => {
               lineHeight: 1.2,
             }}
           >
-            Agentic AI Chat
+            Agentic AI Chat <span style={{ fontSize: '11px', color: '#667eea', fontWeight: 400 }}>v2</span>
           </h1>
           <p
             style={{
-              fontSize: '12px',
-              color: '#888',
+              fontSize: '11px',
+              color: '#666',
               lineHeight: 1.2,
             }}
           >
-            Powered by LangGraph • Qwen 3 • OpenRouter
+            Coordinator → Planner → Executor • LangGraph • Qwen 3
           </p>
         </div>
       </header>
